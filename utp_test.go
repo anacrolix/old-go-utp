@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"regexp"
 	"sync"
 	"testing"
 	"time"
@@ -18,9 +19,9 @@ import (
 	_ "github.com/anacrolix/envpprof"
 	"github.com/anacrolix/missinggo/leaktest"
 	"github.com/bradfitz/iter"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"golang.org/x/net/nettest"
+
+	"github.com/go-quicktest/qt"
 )
 
 func init() {
@@ -36,31 +37,31 @@ func setDefaultTestingDurations() {
 func TestUTPPingPong(t *testing.T) {
 	defer leaktest.GoroutineLeakCheck(t)()
 	s, err := NewSocket("udp", "localhost:0")
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	defer s.Close()
 	pingerClosed := make(chan struct{})
 	go func() {
 		defer close(pingerClosed)
 		b, err := Dial(s.Addr().String())
-		require.NoError(t, err)
+		qt.Assert(t, qt.IsNil(err))
 		defer b.Close()
 		n, err := b.Write([]byte("ping"))
-		require.NoError(t, err)
-		require.EqualValues(t, 4, n)
+		qt.Assert(t, qt.IsNil(err))
+		qt.Assert(t, qt.Equals(n, 4))
 		buf := make([]byte, 4)
 		b.Read(buf)
-		require.EqualValues(t, "pong", buf)
+		qt.Assert(t, qt.Equals(string(buf), "pong"))
 	}()
 	a, err := s.Accept()
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	defer a.Close()
 	buf := make([]byte, 42)
 	n, err := a.Read(buf)
-	require.NoError(t, err)
-	require.EqualValues(t, "ping", buf[:n])
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.Equals(string(buf[:n]), "ping"))
 	n, err = a.Write([]byte("pong"))
-	require.NoError(t, err)
-	require.Equal(t, 4, n)
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.Equals(n, 4))
 	<-pingerClosed
 }
 
@@ -71,7 +72,7 @@ func TestDialTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 	_, err := DialContext(ctx, s.Addr().String())
-	require.Equal(t, context.DeadlineExceeded, err)
+	qt.Assert(t, qt.Equals(err, context.DeadlineExceeded))
 }
 
 func TestListen(t *testing.T) {
@@ -84,7 +85,7 @@ func TestListen(t *testing.T) {
 }
 
 func TestMinMaxHeaderType(t *testing.T) {
-	require.Equal(t, stSyn, stMax)
+	qt.Assert(t, qt.Equals(stMax, stSyn))
 }
 
 func TestConnReadDeadline(t *testing.T) {
@@ -104,14 +105,14 @@ func TestConnReadDeadline(t *testing.T) {
 	dl := time.Now().Add(time.Millisecond)
 	c.SetReadDeadline(dl)
 	_, err := c.Read(nil)
-	require.Equal(t, errTimeout, err)
+	qt.Assert(t, qt.Equals[error](err, errTimeout))
 	// The deadline has passed.
 	if time.Now().Before(dl) {
 		t.Fatal("deadline hasn't passed")
 	}
 	// Returns timeout on subsequent read.
 	_, err = c.Read(nil)
-	require.Equal(t, errTimeout, err)
+	qt.Assert(t, qt.Equals[error](err, errTimeout))
 	// Disable the deadline.
 	c.SetReadDeadline(time.Time{})
 	readReturned := make(chan struct{})
@@ -139,7 +140,7 @@ func TestConnReadDeadline(t *testing.T) {
 func connectSelfLots(n int, t testing.TB) {
 	defer leaktest.GoroutineLeakCheck(t)()
 	s, err := NewSocket("udp", "localhost:0")
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	go func() {
 		for range iter.N(n) {
 			c, err := s.Accept()
@@ -217,7 +218,7 @@ func TestRejectDialBacklogFilled(t *testing.T) {
 	errChan := make(chan error)
 	dial := func() {
 		_, err := s.Dial(s.Addr().String())
-		require.Error(t, err)
+		qt.Assert(t, qt.IsNotNil(err))
 		errChan <- err
 	}
 	// Fill the backlog.
@@ -233,7 +234,7 @@ func TestRejectDialBacklogFilled(t *testing.T) {
 	// One more connection should cause a dial attempt to get reset.
 	go dial()
 	err = <-errChan
-	assert.EqualError(t, err, "peer reset")
+	qt.Check(t, qt.ErrorMatches(err, regexp.QuoteMeta("peer reset")))
 	s.Close()
 	for range iter.N(backlog) {
 		<-errChan
@@ -295,18 +296,18 @@ func TestReadFinishedConn(t *testing.T) {
 	artificialPacketDropChance = 1
 	mu.Unlock()
 	n, err := a.Write([]byte("hello"))
-	require.Equal(t, 5, n)
-	require.NoError(t, err)
+	qt.Assert(t, qt.Equals(n, 5))
+	qt.Assert(t, qt.IsNil(err))
 	n, err = a.Write([]byte("world"))
-	require.Equal(t, 5, n)
-	require.NoError(t, err)
+	qt.Assert(t, qt.Equals(n, 5))
+	qt.Assert(t, qt.IsNil(err))
 	mu.Lock()
 	artificialPacketDropChance = originalAPDC
 	mu.Unlock()
 	a.Close()
 	all, err := ioutil.ReadAll(b)
-	require.NoError(t, err)
-	require.EqualValues(t, "helloworld", all)
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.Equals(string(all), "helloworld"))
 }
 
 func TestCloseDetachesQuickly(t *testing.T) {
@@ -328,9 +329,9 @@ func TestCloseDetachesQuickly(t *testing.T) {
 func TestConnCloseUnclosedSocket(t *testing.T) {
 	t.Parallel()
 	s, err := NewSocket("udp", "localhost:0")
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	defer func() {
-		assert.NoError(t, s.Close())
+		qt.Check(t, qt.IsNil(s.Close()))
 	}()
 	// Prevents the dialing goroutine from closing its end of the Conn before
 	// we can check that it has been registered in the listener.
@@ -339,25 +340,25 @@ func TestConnCloseUnclosedSocket(t *testing.T) {
 	go func() {
 		for range iter.N(2) {
 			c, err := Dial(s.Addr().String())
-			require.NoError(t, err)
+			qt.Assert(t, qt.IsNil(err))
 			<-dialerSync
 			err = c.Close()
-			require.NoError(t, err)
+			qt.Assert(t, qt.IsNil(err))
 		}
 	}()
 	for range iter.N(2) {
 		a, err := s.Accept()
-		require.NoError(t, err)
+		qt.Assert(t, qt.IsNil(err))
 		// We do this in a closure because we need to unlock Server.mu if the
 		// test failure exception is thrown. "Do as we say, not as we do" -Go
 		// team.
 		func() {
 			mu.Lock()
 			defer mu.Unlock()
-			require.Len(t, s.conns, 1)
+			qt.Assert(t, qt.HasLen(s.conns, 1))
 		}()
 		dialerSync <- struct{}{}
-		require.NoError(t, a.Close())
+		qt.Assert(t, qt.IsNil(a.Close()))
 		sleepWhile(&mu, func() bool { return len(s.conns) != 0 })
 	}
 }
@@ -366,7 +367,7 @@ func TestPacketReadTimeout(t *testing.T) {
 	t.Parallel()
 	a, b := connPair()
 	_, err := a.Read(nil)
-	require.Contains(t, err.Error(), "timeout")
+	qt.Assert(t, qt.StringContains(err.Error(), "timeout"))
 	t.Log(err)
 	t.Log(a.Close())
 	t.Log(b.Close())
@@ -425,7 +426,7 @@ func TestMain(m *testing.M) {
 
 func TestAcceptReturnsAfterClose(t *testing.T) {
 	s, err := NewSocket("", "")
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	go s.Close()
 	_, err = s.Accept()
 	t.Log(err)
@@ -438,8 +439,8 @@ func TestWriteClose(t *testing.T) {
 	a.Write([]byte("hiho"))
 	a.Close()
 	c, err := ioutil.ReadAll(b)
-	require.NoError(t, err)
-	require.EqualValues(t, "hiho", c)
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.Equals(string(c), "hiho"))
 	b.Close()
 }
 
@@ -447,23 +448,23 @@ func TestWriteClose(t *testing.T) {
 // closed.
 func TestWriteUnderlyingPacketConnClosed(t *testing.T) {
 	pc, err := listenPacket("inproc", "localhost:0")
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	defer pc.Close()
 	s, err := NewSocketFromPacketConn(pc)
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	defer s.Close()
 	dc, ac := connPairSocket(s)
 	defer dc.Close()
 	defer ac.Close()
 	pc.Close()
 	n, err := ac.Write([]byte("hello"))
-	assert.Equal(t, 0, n)
+	qt.Check(t, qt.Equals(n, 0))
 	// It has to fail. I think it's a race between us writing to the real
 	// PacketConn and getting "closed", and the Socket destroying itself, and
 	// we get it's destroy error.
-	assert.Error(t, err)
+	qt.Check(t, qt.IsNotNil(err))
 	_, err = dc.Read(nil)
-	assert.EqualError(t, err, "Socket destroyed")
+	qt.Check(t, qt.ErrorMatches(err, regexp.QuoteMeta("Socket destroyed")))
 }
 
 func TestFillBuffers(t *testing.T) {
@@ -479,41 +480,41 @@ func TestFillBuffers(t *testing.T) {
 		if err != nil {
 			// Receiver will stop processing packets, packets will be dropped,
 			// and thus not acked.
-			assert.Equal(t, errAckTimeout, err)
+			qt.Check(t, qt.Equals[error](err, errAckTimeout))
 			break
 		}
-		require.NotEqual(t, 0, n)
+		qt.Assert(t, qt.Not(qt.Equals(n, 0)))
 	}
 	t.Logf("buffered %d bytes", len(sent))
 	a.Close()
 	all, err := ioutil.ReadAll(b)
-	assert.NoError(t, err)
-	assert.EqualValues(t, len(sent), len(all))
-	assert.EqualValues(t, sent, all)
+	qt.Check(t, qt.IsNil(err))
+	qt.Check(t, qt.Equals(len(all), len(sent)))
+	qt.Check(t, qt.DeepEquals(all, sent))
 }
 
 func TestConnLocalRemoteAddr(t *testing.T) {
 	a, b := connPair()
-	assert.EqualValues(t, "utp/inproc", a.LocalAddr().Network())
-	assert.EqualValues(t, "utp/inproc", a.RemoteAddr().Network())
-	assert.EqualValues(t, "utp/inproc", b.LocalAddr().Network())
-	assert.EqualValues(t, "utp/inproc", b.RemoteAddr().Network())
-	assert.EqualValues(t, a.LocalAddr().String(), b.RemoteAddr().String())
-	assert.EqualValues(t, b.LocalAddr().String(), a.RemoteAddr().String())
+	qt.Check(t, qt.Equals(a.LocalAddr().Network(), "utp/inproc"))
+	qt.Check(t, qt.Equals(a.RemoteAddr().Network(), "utp/inproc"))
+	qt.Check(t, qt.Equals(b.LocalAddr().Network(), "utp/inproc"))
+	qt.Check(t, qt.Equals(b.RemoteAddr().Network(), "utp/inproc"))
+	qt.Check(t, qt.Equals(b.RemoteAddr().String(), a.LocalAddr().String()))
+	qt.Check(t, qt.Equals(a.RemoteAddr().String(), b.LocalAddr().String()))
 	a.Close()
 	b.Close()
 	udpConn, err := net.ListenPacket("udp", "localhost:0")
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	udpSock, err := NewSocketFromPacketConn(udpConn)
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	a, b = connPairSocket(udpSock)
 	udpSock.Close()
-	assert.EqualValues(t, "utp/udp", a.LocalAddr().Network())
-	assert.EqualValues(t, "utp/udp", a.RemoteAddr().Network())
-	assert.EqualValues(t, "utp/udp", b.LocalAddr().Network())
-	assert.EqualValues(t, "utp/udp", b.RemoteAddr().Network())
-	assert.EqualValues(t, a.LocalAddr().String(), b.RemoteAddr().String())
-	assert.EqualValues(t, b.LocalAddr().String(), a.RemoteAddr().String())
+	qt.Check(t, qt.Equals(a.LocalAddr().Network(), "utp/udp"))
+	qt.Check(t, qt.Equals(a.RemoteAddr().Network(), "utp/udp"))
+	qt.Check(t, qt.Equals(b.LocalAddr().Network(), "utp/udp"))
+	qt.Check(t, qt.Equals(b.RemoteAddr().Network(), "utp/udp"))
+	qt.Check(t, qt.Equals(b.RemoteAddr().String(), a.LocalAddr().String()))
+	qt.Check(t, qt.Equals(a.RemoteAddr().String(), b.LocalAddr().String()))
 	a.Close()
 	b.Close()
 }
@@ -521,8 +522,8 @@ func TestConnLocalRemoteAddr(t *testing.T) {
 func BenchmarkEchoLongBuffer(tb *testing.B) {
 	pristine := make([]byte, 3000000)
 	n, err := io.ReadFull(rand.Reader, pristine)
-	require.EqualValues(tb, len(pristine), n)
-	require.NoError(tb, err)
+	qt.Assert(tb, qt.Equals(n, len(pristine)))
+	qt.Assert(tb, qt.IsNil(err))
 	tb.SetBytes(int64(len(pristine)))
 	tb.ResetTimer()
 	for range iter.N(tb.N) {
@@ -532,21 +533,21 @@ func BenchmarkEchoLongBuffer(tb *testing.B) {
 			defer b.Close()
 			go func() {
 				n, err := io.Copy(b, b)
-				require.NoError(tb, err)
-				require.EqualValues(tb, len(pristine), n)
+				qt.Assert(tb, qt.IsNil(err))
+				qt.Assert(tb, qt.Equals(n, int64(len(pristine))))
 				b.Close()
 			}()
 			go func() {
 				n, err := a.Write(pristine)
-				require.NoError(tb, err)
-				require.EqualValues(tb, len(pristine), n)
+				qt.Assert(tb, qt.IsNil(err))
+				qt.Assert(tb, qt.Equals(n, len(pristine)))
 			}()
 			echo := make([]byte, len(pristine))
 			n, err := io.ReadFull(a, echo)
 			a.Close()
-			assert.NoError(tb, err)
-			require.EqualValues(tb, len(echo), n)
-			require.True(tb, bytes.Equal(pristine, echo))
+			qt.Check(tb, qt.IsNil(err))
+			qt.Assert(tb, qt.Equals(n, len(echo)))
+			qt.Assert(tb, qt.IsTrue(bytes.Equal(pristine, echo)))
 		}()
 	}
 }
@@ -556,21 +557,21 @@ func BenchmarkEchoLongBuffer(tb *testing.B) {
 // when the Socket and Conn are closed.
 func TestSocketDestroyedConnsClosedTimeout(t *testing.T) {
 	s1pc, err := net.ListenPacket("udp", "localhost:0")
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	s1, err := NewSocketFromPacketConnNoClose(s1pc)
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	s2, err := NewSocket("", "localhost:0")
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	accepted := make(chan struct{})
 	var s1c net.Conn
 	go func() {
 		var err error
 		s1c, err = s1.Accept()
 		close(accepted)
-		require.NoError(t, err)
+		qt.Assert(t, qt.IsNil(err))
 	}()
 	s2c, err := s2.Dial(s1.Addr().String())
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	<-accepted
 	// Axe Socket 1's PacketConn.
 	s1pc.Close()
@@ -605,27 +606,27 @@ func TestCloseNow(t *testing.T) {
 	s2Addr := "localhost:0"
 	for i := 0; i < 100; i++ {
 		s1, err := NewSocket("udp", s1Addr)
-		assert.NoError(t, err)
+		qt.Check(t, qt.IsNil(err))
 		s2, err := NewSocket("udp", s2Addr)
-		assert.NoError(t, err)
+		qt.Check(t, qt.IsNil(err))
 		s1Addr = s1.Addr().String()
 		s2Addr = s2.Addr().String()
 		go func() {
 			c, err := s1.Dial(s2.Addr().String())
-			assert.NoError(t, err)
+			qt.Check(t, qt.IsNil(err))
 			_, err = c.Write([]byte("ping"))
-			assert.NoError(t, err)
+			qt.Check(t, qt.IsNil(err))
 			_, err = c.Read(nil)
-			assert.Equal(t, err.Error(), "EOF")
+			qt.Check(t, qt.Equals(err.Error(), "EOF"))
 		}()
 		c, _ := s2.Accept()
 		buf := make([]byte, 4)
 		_, err = c.Read(buf)
-		assert.NoError(t, err)
+		qt.Check(t, qt.IsNil(err))
 		s1.CloseNow()
 		s2.CloseNow()
 		_, err = c.Read(nil)
-		assert.Equal(t, err.Error(), "EOF")
+		qt.Check(t, qt.Equals(err.Error(), "EOF"))
 	}
 }
 

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/go-quicktest/qt"
 )
 
 func getTCPConnectionPair() (net.Conn, net.Conn, error) {
@@ -65,14 +65,14 @@ func getUTPConnectionPair() (net.Conn, net.Conn, error) {
 
 func requireWriteAll(t testing.TB, b []byte, w io.Writer) {
 	n, err := w.Write(b)
-	require.NoError(t, err)
-	require.EqualValues(t, len(b), n)
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.Equals(n, len(b)))
 }
 
 func requireReadExactly(t testing.TB, b []byte, r io.Reader) {
 	n, err := io.ReadFull(r, b)
-	require.NoError(t, err)
-	require.EqualValues(t, len(b), n)
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.Equals(n, len(b)))
 }
 
 func benchConnPair(b *testing.B, c0, c1 net.Conn) {

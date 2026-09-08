@@ -6,44 +6,45 @@ import (
 	"io"
 	"log"
 	"net"
+	"regexp"
 	"testing"
 	"time"
 
 	"github.com/anacrolix/missinggo"
 	"github.com/anacrolix/missinggo/inproc"
 	"github.com/bradfitz/iter"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
+
+	"github.com/go-quicktest/qt"
 )
 
 func TestAcceptOnDestroyedSocket(t *testing.T) {
 	pc, err := net.ListenPacket("udp", "localhost:0")
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	s, err := NewSocketFromPacketConn(pc)
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	go pc.Close()
 	_, err = s.Accept()
-	require.Error(t, err)
+	qt.Assert(t, qt.IsNotNil(err))
 	t.Log(err.Error())
 }
 
 func TestSocketDeadlines(t *testing.T) {
 	s, err := NewSocket("udp", "localhost:0")
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	defer s.Close()
-	assert.NoError(t, s.SetReadDeadline(time.Now()))
+	qt.Check(t, qt.IsNil(s.SetReadDeadline(time.Now())))
 	_, _, err = s.ReadFrom(nil)
-	assert.Equal(t, errTimeout, err)
-	assert.NoError(t, s.SetWriteDeadline(time.Now()))
+	qt.Check(t, qt.Equals[error](err, errTimeout))
+	qt.Check(t, qt.IsNil(s.SetWriteDeadline(time.Now())))
 	_, err = s.WriteTo(nil, nil)
-	assert.Equal(t, errTimeout, err)
-	assert.NoError(t, s.SetDeadline(time.Time{}))
-	assert.NoError(t, s.Close())
+	qt.Check(t, qt.Equals[error](err, errTimeout))
+	qt.Check(t, qt.IsNil(s.SetDeadline(time.Time{})))
+	qt.Check(t, qt.IsNil(s.Close()))
 }
 
 func TestSaturateSocketConnIDs(t *testing.T) {
 	s, err := NewSocket("inproc", "")
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	defer s.Close()
 	var acceptedConns, dialedConns []net.Conn
 	for range iter.N(500) {
@@ -58,7 +59,7 @@ func TestSaturateSocketConnIDs(t *testing.T) {
 			close(accepted)
 		}()
 		c, err := s.Dial(s.Addr().String())
-		require.NoError(t, err)
+		qt.Assert(t, qt.IsNil(err))
 		dialedConns = append(dialedConns, c)
 		<-accepted
 	}
@@ -67,25 +68,25 @@ func TestSaturateSocketConnIDs(t *testing.T) {
 		data := []byte(fmt.Sprintf("%7d", i))
 		dc := dialedConns[i]
 		n, err := dc.Write(data)
-		require.NoError(t, err)
-		require.EqualValues(t, 7, n)
-		require.NoError(t, dc.Close())
+		qt.Assert(t, qt.IsNil(err))
+		qt.Assert(t, qt.Equals(n, 7))
+		qt.Assert(t, qt.IsNil(dc.Close()))
 		var b [8]byte
 		ac := acceptedConns[i]
 		n, err = ac.Read(b[:])
-		require.NoError(t, err)
-		require.EqualValues(t, 7, n)
-		require.EqualValues(t, data, b[:n])
+		qt.Assert(t, qt.IsNil(err))
+		qt.Assert(t, qt.Equals(n, 7))
+		qt.Assert(t, qt.DeepEquals(b[:n], data))
 		n, err = ac.Read(b[:])
-		require.EqualValues(t, 0, n)
-		require.EqualValues(t, io.EOF, err)
+		qt.Assert(t, qt.Equals(n, 0))
+		qt.Assert(t, qt.Equals(err, io.EOF))
 		ac.Close()
 	}
 }
 
 func TestUTPRawConn(t *testing.T) {
 	l, err := NewSocket("inproc", "")
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	defer l.Close()
 	go func() {
 		for {
@@ -100,7 +101,7 @@ func TestUTPRawConn(t *testing.T) {
 		s, _ := NewSocket("inproc", "")
 		defer s.Close()
 		ret, err := s.Dial(fmt.Sprintf("localhost:%d", missinggo.AddrPort(l.Addr())))
-		require.NoError(t, err)
+		qt.Assert(t, qt.IsNil(err))
 		return ret
 	}()
 	if err != nil {
@@ -156,19 +157,19 @@ func TestUTPRawConn(t *testing.T) {
 
 func TestAcceptGone(t *testing.T) {
 	s, err := NewSocket("udp", "localhost:0")
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	defer s.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
 	defer cancel()
 	_, err = DialContext(ctx, s.Addr().String())
-	require.Error(t, err)
+	qt.Assert(t, qt.IsNotNil(err))
 	// Will succeed because we don't signal that we give up dialing, or check
 	// that the handshake is completed before returning the new Conn.
 	c, err := s.Accept()
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	defer c.Close()
 	err = c.SetReadDeadline(time.Now().Add(time.Millisecond))
-	require.NoError(t, err)
+	qt.Assert(t, qt.IsNil(err))
 	_, err = c.Read(nil)
-	require.EqualError(t, err, "i/o timeout")
+	qt.Assert(t, qt.ErrorMatches(err, regexp.QuoteMeta("i/o timeout")))
 }

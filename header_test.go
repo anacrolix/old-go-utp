@@ -3,7 +3,7 @@ package utp
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/go-quicktest/qt"
 )
 
 func TestSelectiveAckBitmaskBytesLen(t *testing.T) {
@@ -17,6 +17,6 @@ func TestSelectiveAckBitmaskBytesLen(t *testing.T) {
 	} {
 		var selAck selectiveAckBitmask
 		selAck.SetBit(_case.BitIndex)
-		assert.EqualValues(t, _case.ExpectedLen, len(selAck.Bytes))
+		qt.Check(t, qt.Equals(len(selAck.Bytes), _case.ExpectedLen))
 	}
 }
