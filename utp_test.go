@@ -87,6 +87,24 @@ func TestMinMaxHeaderType(t *testing.T) {
 	require.Equal(t, stSyn, stMax)
 }
 
+func TestCongestionWindowFollowsDelay(t *testing.T) {
+	c := Conn{
+		congestionWindow: 2 * maxPayloadSize,
+		lastTimeDiff:     10_000,
+	}
+	c.updateCongestionWindow(maxPayloadSize)
+	require.Equal(t, uint32(2*maxPayloadSize), c.congestionWindow)
+
+	c.lastTimeDiff = 20_000
+	c.updateCongestionWindow(maxPayloadSize)
+	require.Greater(t, c.congestionWindow, uint32(2*maxPayloadSize))
+
+	c.lastTimeDiff = 220_000
+	c.updateCongestionWindow(maxPayloadSize)
+	require.Less(t, c.congestionWindow, uint32(2*maxPayloadSize))
+	require.GreaterOrEqual(t, c.congestionWindow, uint32(maxPayloadSize))
+}
+
 func TestConnReadDeadline(t *testing.T) {
 	t.Parallel()
 	ls, _ := NewSocket("udp", "localhost:0")

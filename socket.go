@@ -338,6 +338,7 @@ func (s *Socket) newConn(addr net.Addr) (c *Conn) {
 		socket:           s,
 		remoteSocketAddr: addr,
 		created:          time.Now(),
+		congestionWindow: 2 * maxPayloadSize,
 	}
 	c.sendPendingSendSendStateTimer = missinggo.StoppedFuncTimer(c.sendPendingSendStateTimerCallback)
 	c.packetReadTimeoutTimer = time.AfterFunc(packetReadTimeout, c.receivePacketTimeoutCallback)
