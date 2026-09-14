@@ -44,6 +44,10 @@ const (
 
 	readBufferLen = 1 << 20 // ~1MiB
 
+	// The target queuing delay used by uTP's delay-based congestion control.
+	congestionTargetDelay = 100 * time.Millisecond
+	maxCongestionWindow   = 100 * maxPayloadSize
+
 	// How long to wait before sending a state packet, after one is required.
 	// This prevents spamming a state packet for every packet received, and
 	// non-state packets that are being sent also fill the role.
