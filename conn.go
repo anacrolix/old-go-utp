@@ -20,6 +20,8 @@ type Conn struct {
 	lastTimeDiff     uint32
 	peerWndSize      uint32
 	cur_window       uint32
+	congestionWindow uint32
+	baseDelay        uint32
 	connKey          connKey
 
 	// Data waiting to be Read.
@@ -265,6 +267,7 @@ func (c *Conn) ack(nr uint16) {
 	latency, first := s.Ack()
 	if first {
 		c.cur_window -= s.payloadSize
+		c.updateCongestionWindow(s.payloadSize)
 		c.updateCanWrite()
 		c.addLatency(latency)
 	}
@@ -352,12 +355,12 @@ func (c *Conn) processDelivery(h header, payload []byte) {
 	defer c.lazyDestroy()
 	c.assertHeader(h)
 	c.peerWndSize = h.WndSize
-	c.applyAcks(h)
 	if h.Timestamp == 0 {
 		c.lastTimeDiff = 0
 	} else {
 		c.lastTimeDiff = c.timestamp() - h.Timestamp
 	}
+	c.applyAcks(h)
 
 	if h.Type == stReset {
 		c.destroy(errors.New("peer reset"))
@@ -561,9 +564,50 @@ func (c *Conn) String() string {
 }
 
 func (c *Conn) updateCanWrite() {
+	if c.congestionWindow == 0 {
+		c.congestionWindow = 2 * maxPayloadSize
+	}
 	c.canWrite.SetBool(c.synAcked &&
 		len(c.unackedSends) < maxUnackedSends &&
-		c.cur_window <= c.peerWndSize)
+		c.cur_window <= minUint32(c.peerWndSize, c.congestionWindow))
+}
+
+func (c *Conn) updateCongestionWindow(acked uint32) {
+	if acked == 0 || c.lastTimeDiff == 0 {
+		return
+	}
+	if c.baseDelay == 0 || c.lastTimeDiff < c.baseDelay {
+		c.baseDelay = c.lastTimeDiff
+		return
+	}
+	delay := c.lastTimeDiff - c.baseDelay
+	target := uint64(congestionTargetDelay / time.Microsecond)
+	window := uint64(c.congestionWindow)
+	if window == 0 {
+		window = 2 * maxPayloadSize
+	}
+	var change uint64
+	if delay < uint32(target) {
+		change = uint64(maxPayloadSize) * uint64(acked) * (target - uint64(delay)) / target / window
+		c.congestionWindow += uint32(change)
+	} else {
+		change = uint64(acked) * (uint64(delay) - target) / target
+		if change >= window-uint64(maxPayloadSize) {
+			c.congestionWindow = maxPayloadSize
+		} else {
+			c.congestionWindow = uint32(window - change)
+		}
+	}
+	if c.congestionWindow > maxCongestionWindow {
+		c.congestionWindow = maxCongestionWindow
+	}
+}
+
+func minUint32(a, b uint32) uint32 {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func (c *Conn) Write(p []byte) (n int, err error) {
